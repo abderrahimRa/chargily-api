@@ -1,28 +1,330 @@
 import express from "express";
 import cors from "cors";
+import dotenv from "dotenv";
+import nodemailer from "nodemailer";
+import axios from "axios";
+import { verifySignature } from "@chargily/chargily-pay";
 
+dotenv.config();
 const app = express();
 app.use(cors());
 
-// ✅ Static Chargily payment link (already created in Chargily dashboard)
+// Middleware to capture raw body for signature verification
+app.use("/webhook", express.raw({ type: "application/json" }));
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
+// Optional client webhook forwarding URL
+const CLIENT_WEBHOOK_URL = process.env.CLIENT_WEBHOOK_URL || "";
+
+// Chargily API configuration
+const CHARGILY_API_KEY =
+  process.env.CHARGILY_API_KEY || process.env.CHARGILY_SECRET_KEY || "";
+
+// Create a single transporter and verify it at startup for better visibility
+const transporter = nodemailer.createTransport({
+  host: process.env.SMTP_HOST,
+  port: parseInt(process.env.SMTP_PORT) || 587,
+  secure: process.env.SMTP_SECURE === "true",
+  auth: {
+    user: process.env.SMTP_USER,
+    pass: process.env.SMTP_PASS,
+  },
+  logger: true,
+  debug: true,
+});
+
+transporter.verify((err, success) => {
+  if (err) {
+    console.error("SMTP transporter verification failed:", err?.message || err);
+  } else {
+    console.log("SMTP transporter is ready");
+  }
+});
+
+// ✅ Chargily static payment link
 const CHARGILY_PAYMENT_LINK =
-  "http://pay.chargily.com/payment-links/01k8ts5v092rztj10vhwkwm226";
+  "http://pay.chargily.com/test/payment-links/01k8x9dyrp67pkm5kt3gb7xry4";
 
 // ✅ Pages
 const THANK_YOU_PAGE = "https://www.kobouchacademy.com/943d7675";
 const FAILURE_PAGE = "https://www.kobouchacademy.com/93e8de5d";
 
-// 🔹 Checkout route — redirect directly to Chargily payment page
+// ✅ Course Google Drive link
+const COURSE_DRIVE_LINK =
+  "https://drive.google.com/drive/folders/1du0o_pfQTLgFKTmM1clmvc4ZLEEDsIq6?usp=sharing";
+
+// 🔹 Checkout route — redirect to Chargily
 app.get("/checkout", (req, res) => {
+  // Get customer email from query param if provided
+  const email = req.query.email || "";
+
+  // If email provided, we could create a dynamic payment link
+  // For now, redirect to static link but log the email
+  if (email) {
+    console.log("Checkout initiated for email:", email);
+    // TODO: Store email-paymentId mapping in database/memory for later lookup
+  }
+
   res.redirect(CHARGILY_PAYMENT_LINK);
 });
 
-// 🔹 Simulation routes for testing redirects
+// 🔹 Alternative: Create payment session with return URL (if Chargily API supports it)
+app.post("/create-payment", async (req, res) => {
+  const { email, amount = 100 } = req.body; // amount in smallest currency unit
+
+  if (!email) {
+    return res.status(400).json({ error: "Email required" });
+  }
+
+  try {
+    // This would use Chargily API to create a payment session
+    // const paymentSession = await createChargilyPayment({
+    //   amount,
+    //   customer: { email },
+    //   success_url: `https://chargily-api-1.onrender.com/payment-return?email=${encodeURIComponent(email)}&status=success`,
+    //   cancel_url: `https://chargily-api-1.onrender.com/payment-return?email=${encodeURIComponent(email)}&status=failed`
+    // });
+
+    // For now, redirect to static link with email in query
+    const paymentUrl = `${CHARGILY_PAYMENT_LINK}?prefill_email=${encodeURIComponent(
+      email
+    )}`;
+    res.json({ payment_url: paymentUrl });
+  } catch (err) {
+    console.error("Failed to create payment:", err);
+    res.status(500).json({ error: "Failed to create payment" });
+  }
+});
+
+// 🔹 Payment return handler - for when Chargily redirects user back after payment
+app.get("/payment-return", async (req, res) => {
+  console.log("Payment return called with query params:", req.query);
+  console.log("Payment return called with URL:", req.url);
+
+  // Extract payment info from query parameters or URL path
+  const paymentId = req.query.payment_id || req.query.id || "";
+  const status = req.query.status || req.query.payment_status || "";
+  const email = req.query.email || req.query.customer_email || "";
+
+  // Log for debugging
+  console.log(
+    "Extracted - paymentId:",
+    paymentId,
+    "status:",
+    status,
+    "email:",
+    email
+  );
+
+  // If we have an email and it looks like success, send the course
+  if (email && (status === "success" || status === "paid" || paymentId)) {
+    try {
+      await sendEmail(email, COURSE_DRIVE_LINK);
+      console.log(`Course link sent to ${email} from payment return`);
+    } catch (err) {
+      console.error(
+        "Failed to send email from payment return:",
+        err?.message || err
+      );
+    }
+  }
+
+  // Redirect user to thank you page regardless
+  res.redirect(THANK_YOU_PAGE);
+});
+
+// 🔹 Simulation routes
 app.get("/simulate-success", (req, res) => res.redirect(THANK_YOU_PAGE));
 app.get("/simulate-failed", (req, res) => res.redirect(FAILURE_PAGE));
 
+// 🔹 Webhook route — called by Chargily on successful payment
+let lastWebhook = null; // store last webhook for debugging
+
+app.post("/webhook", async (req, res) => {
+  const signature = req.get("signature") || req.get("x-signature") || "";
+  const payload = req.body; // This is the raw Buffer from express.raw()
+
+  // Store webhook for debugging
+  lastWebhook = {
+    headers: req.headers,
+    body: payload.toString(), // Convert Buffer to string for storage
+    receivedAt: new Date().toISOString(),
+    signature: signature,
+  };
+
+  console.log("=== CHARGILY WEBHOOK RECEIVED ===");
+  console.log("Headers:", JSON.stringify(req.headers, null, 2));
+  console.log("Signature:", signature);
+  console.log("Raw payload length:", payload.length);
+  console.log("==============================");
+
+  // Verify signature if API key is configured
+  if (CHARGILY_API_KEY && signature) {
+    try {
+      if (!verifySignature(payload, signature, CHARGILY_API_KEY)) {
+        console.warn("❌ Webhook signature verification failed");
+        return res.status(403).send("Invalid signature");
+      }
+      console.log("✅ Webhook signature verified");
+    } catch (error) {
+      console.error("❌ Error verifying signature:", error?.message || error);
+      return res.status(403).send("Signature verification error");
+    }
+  } else if (signature && !CHARGILY_API_KEY) {
+    console.warn(
+      "⚠️ Signature provided but no CHARGILY_API_KEY configured - skipping verification for testing"
+    );
+  } else {
+    console.warn(
+      "⚠️ No signature header or API key - webhook accepted without verification (testing mode)"
+    );
+  }
+
+  // Acknowledge immediately - Chargily expects quick 200 response
+  res.status(200).json({ received: true, timestamp: new Date().toISOString() });
+
+  // Parse the JSON payload
+  let event;
+  try {
+    event = JSON.parse(payload.toString());
+    lastWebhook.parsedBody = event; // Store parsed version too
+  } catch (parseError) {
+    console.error(
+      "❌ Failed to parse webhook payload as JSON:",
+      parseError?.message || parseError
+    );
+    return;
+  }
+
+  console.log("Parsed event:", JSON.stringify(event, null, 2));
+
+  // Process in background
+  setImmediate(async () => {
+    try {
+      // Handle different event types from Chargily
+      const eventType = event.type || "";
+      const data = event.data || event;
+
+      console.log("Event type:", eventType);
+      console.log("Event data:", JSON.stringify(data, null, 2));
+
+      // Check for successful payment events
+      const isSuccessfulPayment =
+        eventType === "checkout.paid" ||
+        eventType === "payment.paid" ||
+        eventType === "checkout.completed" ||
+        data.status === "paid" ||
+        data.status === "completed" ||
+        data.status === "successful";
+
+      if (isSuccessfulPayment) {
+        // Try multiple possible email field paths for Chargily's format
+        const customerEmail =
+          data.customer?.email ||
+          data.customer_email ||
+          data.client?.email ||
+          data.billing_details?.email ||
+          data.metadata?.customer_email ||
+          "";
+
+        console.log("Extracted customer email:", customerEmail);
+
+        if (customerEmail && customerEmail.includes("@")) {
+          try {
+            await sendEmail(customerEmail, COURSE_DRIVE_LINK);
+            console.log(`✅ Course link sent successfully to ${customerEmail}`);
+          } catch (emailErr) {
+            console.error(
+              `❌ Failed to send email to ${customerEmail}:`,
+              emailErr?.message || emailErr
+            );
+          }
+        } else {
+          console.warn(
+            "⚠️ No valid customer email found in webhook. Event data:",
+            JSON.stringify(data, null, 2)
+          );
+        }
+
+        // Forward to client system if configured
+        if (CLIENT_WEBHOOK_URL) {
+          try {
+            await axios.post(CLIENT_WEBHOOK_URL, event, { timeout: 5000 });
+            console.log("✅ Event forwarded to client webhook");
+          } catch (forwardErr) {
+            console.error(
+              "❌ Failed to forward to client webhook:",
+              forwardErr?.message || forwardErr
+            );
+          }
+        }
+      } else {
+        console.log(
+          "ℹ️ Event is not a successful payment:",
+          eventType,
+          data.status
+        );
+      }
+    } catch (err) {
+      console.error("❌ Error processing webhook:", err?.message || err);
+    }
+  });
+});
+
+// Debug endpoint: return the last webhook payload we received (if any)
+app.get("/last-webhook", (req, res) => {
+  if (!lastWebhook)
+    return res.status(404).send({ error: "no webhook received yet" });
+  return res.send(lastWebhook);
+});
+
+// 🔹 Nodemailer setup
+async function sendEmail(to, courseLink) {
+  const mailOptions = {
+    from: process.env.SMTP_USER,
+    to,
+    subject: "Your Course from Kobouch Academy",
+    html: `
+      <p>Congratulations! Your payment was successful.</p>
+      <p>Here is your course link:</p>
+      <a href="${courseLink}">Access the course</a>
+    `,
+  };
+
+  try {
+    const info = await transporter.sendMail(mailOptions);
+    console.log("Email sent:", info?.messageId || info);
+    return info;
+  } catch (err) {
+    console.error("sendEmail error:", err?.message || err);
+    throw err;
+  }
+}
+
+// 🔹 Test email endpoint — use this to verify SMTP settings from your host
+app.get("/test-email", async (req, res) => {
+  const to = req.query.to || process.env.TEST_TO_EMAIL;
+  if (!to)
+    return res
+      .status(400)
+      .send({ error: "missing ?to query or TEST_TO_EMAIL env" });
+
+  try {
+    await sendEmail(to, COURSE_DRIVE_LINK);
+    return res.send({ ok: true, to });
+  } catch (err) {
+    console.error("Test email failed:", err?.message || err);
+    return res
+      .status(500)
+      .send({ ok: false, error: err?.message || String(err) });
+  }
+});
+
 // 🔹 Test route
-app.get("/", (req, res) => res.send("Chargily redirect API is running ✅"));
+app.get("/", (req, res) =>
+  res.send("Chargily API + email delivery running ✅")
+);
 
 // 🔹 Start server
 const PORT = process.env.PORT || 3000;

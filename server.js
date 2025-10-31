@@ -220,7 +220,7 @@ app.post("/webhook", async (req, res) => {
 
       if (isSuccessfulPayment) {
         // Try multiple possible email field paths for Chargily's format
-        const customerEmail =
+        let customerEmail =
           data.customer?.email ||
           data.customer_email ||
           data.client?.email ||
@@ -228,8 +228,38 @@ app.post("/webhook", async (req, res) => {
           data.metadata?.customer_email ||
           "";
 
-        console.log("Extracted customer email:", customerEmail);
+        // If no email in webhook, try to fetch customer details using customer_id
+        if (!customerEmail && data.customer_id && CHARGILY_API_KEY) {
+          try {
+            console.log(
+              `Fetching customer details for ID: ${data.customer_id}`
+            );
+            const customerResponse = await axios.get(
+              `https://pay.chargily.com/test/api/v2/customers/${data.customer_id}`,
+              {
+                headers: {
+                  Authorization: `Bearer ${CHARGILY_API_KEY}`,
+                  "Content-Type": "application/json",
+                },
+                timeout: 10000,
+              }
+            );
 
+            customerEmail =
+              customerResponse.data?.email ||
+              customerResponse.data?.data?.email ||
+              "";
+            console.log(`Fetched customer email: ${customerEmail}`);
+          } catch (apiError) {
+            console.error(
+              `Failed to fetch customer details: ${
+                apiError?.response?.data || apiError?.message || apiError
+              }`
+            );
+          }
+        }
+
+        console.log("Final extracted customer email:", customerEmail);
         if (customerEmail && customerEmail.includes("@")) {
           try {
             await sendEmail(customerEmail, COURSE_DRIVE_LINK);

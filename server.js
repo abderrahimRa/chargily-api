@@ -21,20 +21,15 @@ const CLIENT_WEBHOOK_URL = process.env.CLIENT_WEBHOOK_URL || "";
 const CHARGILY_API_KEY =
   process.env.CHARGILY_API_KEY || process.env.CHARGILY_SECRET_KEY || "";
 
-// Create a single transporter and verify it at startup for better visibility
+// Create a single transporter with optimized settings for hosting platforms
 const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST,
-  port: parseInt(process.env.SMTP_PORT) || 465,
-  secure: true, // Use SSL/TLS
+  service: "gmail", // Use Gmail service instead of manual SMTP
   auth: {
     user: process.env.SMTP_USER,
     pass: process.env.SMTP_PASS,
   },
   logger: true,
-  debug: true,
-  connectionTimeout: 60000, // 60 seconds
-  greetingTimeout: 30000, // 30 seconds
-  socketTimeout: 60000, // 60 seconds
+  debug: false, // Reduce logging
 });
 
 transporter.verify((err, success) => {
@@ -344,11 +339,49 @@ async function sendEmail(to, courseLink) {
   };
 
   try {
+    console.log(`Attempting to send email to: ${to}`);
     const info = await transporter.sendMail(mailOptions);
-    console.log("Email sent:", info?.messageId || info);
+    console.log("✅ Email sent successfully:", info?.messageId || info);
     return info;
   } catch (err) {
-    console.error("sendEmail error:", err?.message || err);
+    console.error("❌ Send Error:", err?.message || err);
+
+    // Try alternative approach if Gmail service fails
+    if (
+      err?.message?.includes("timeout") ||
+      err?.message?.includes("connection")
+    ) {
+      console.log("🔄 Attempting fallback SMTP configuration...");
+
+      const fallbackTransporter = nodemailer.createTransport({
+        host: "smtp.gmail.com",
+        port: 587,
+        secure: false,
+        auth: {
+          user: process.env.SMTP_USER,
+          pass: process.env.SMTP_PASS,
+        },
+        tls: {
+          rejectUnauthorized: false,
+        },
+      });
+
+      try {
+        const fallbackInfo = await fallbackTransporter.sendMail(mailOptions);
+        console.log(
+          "✅ Fallback email sent successfully:",
+          fallbackInfo?.messageId || fallbackInfo
+        );
+        return fallbackInfo;
+      } catch (fallbackErr) {
+        console.error(
+          "❌ Fallback also failed:",
+          fallbackErr?.message || fallbackErr
+        );
+        throw fallbackErr;
+      }
+    }
+
     throw err;
   }
 }

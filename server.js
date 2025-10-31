@@ -9,7 +9,8 @@ app.use(cors());
 
 // ✅ Your existing Chargily static payment link
 const CHARGILY_PAYMENT_LINK =
-  "https://pay.chargily.com/payment-links/01k8ts5v092rztj10vhwkwm226";
+  "http://pay.chargily.com/test/payment-links/01k8x9dyrp67pkm5kt3gb7xry4";
+  //"https://pay.chargily.com/payment-links/01k8ts5v092rztj10vhwkwm226";//
 
 // 🔹 Checkout route — redirects directly to Chargily link
 app.get("/checkout", (req, res) => {

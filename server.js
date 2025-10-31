@@ -20,18 +20,24 @@ const FAILURE_PAGE = "https://www.kobouchacademy.com/93e8de5d";
 app.get("/checkout", async (req, res) => {
   try {
     const response = await axios.post(
-      CHARGILY_API_URL,
+      "https://pay.chargily.com/api/v2/payment-links",
       {
-        amount: 4900,
-        currency: "DZD",
-        description: "Digital Course Purchase - Kobouch Academy",
-        success_url: THANK_YOU_PAGE,
-        failure_url: FAILURE_PAGE,
+        name: "Digital Course Purchase - Kobouch Academy", // required
+        items: [
+          {
+            name: "Course 1",
+            price: 4900,
+            currency: "DZD",
+            quantity: 1,
+          },
+        ],
+        success_url: "https://www.kobouchacademy.com/943d7675",
+        failure_url: "https://www.kobouchacademy.com/93e8de5d",
         metadata: { product: "course1" },
       },
       {
         headers: {
-          Authorization: `Bearer ${CHARGILY_SECRET_KEY}`,
+          Authorization: `Bearer ${process.env.CHARGILY_SECRET_KEY}`,
           "Content-Type": "application/json",
         },
       }
@@ -40,7 +46,6 @@ app.get("/checkout", async (req, res) => {
     const data = response.data;
 
     if (data.checkout_url) {
-      // Redirect user to live checkout page
       res.redirect(data.checkout_url);
     } else {
       res

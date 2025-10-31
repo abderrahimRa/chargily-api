@@ -163,7 +163,9 @@ app.post("/webhook", async (req, res) => {
   if (CHARGILY_API_KEY && signature) {
     try {
       if (!verifySignature(payload, signature, CHARGILY_API_KEY)) {
-        console.warn("❌ Webhook signature verification failed - continuing anyway for now");
+        console.warn(
+          "❌ Webhook signature verification failed - continuing anyway for now"
+        );
         // TODO: Fix signature verification - temporarily disabled
         // return res.status(403).send("Invalid signature");
       } else {

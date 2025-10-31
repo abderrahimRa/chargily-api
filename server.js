@@ -52,6 +52,24 @@ app.get("/checkout", async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 });
+app.post("/webhook", (req, res) => {
+  const event = req.body;
+
+  // Log for debugging
+  console.log("Webhook received:", event);
+
+  // Check if payment was successful
+  if (event.status === "PAID") {
+    const product = event.metadata?.product;
+    const customerEmail = event.client?.email;
+
+    // TODO: Unlock course, send email, save to database
+    console.log(`Grant access to ${product} for ${customerEmail}`);
+  }
+
+  // Respond quickly to Chargily to confirm receipt
+  res.status(200).send({ received: true });
+});
 
 // 🔹 Optional routes for testing
 app.get("/simulate-success", (req, res) => res.redirect(THANK_YOU_PAGE));

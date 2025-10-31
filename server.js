@@ -12,7 +12,7 @@ app.use(cors());
 const BASE_URL = "https://pay.chargily.com/api/v2/payments";
 
 // Single course route
-app.get("/buy-course1", async (req, res) => {
+app.get("/checkout", async (req, res) => {
   try {
     const response = await axios.post(
       BASE_URL,

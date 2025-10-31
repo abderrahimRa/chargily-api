@@ -22,7 +22,7 @@ const CHARGILY_API_KEY =
   process.env.CHARGILY_API_KEY || process.env.CHARGILY_SECRET_KEY || "";
 
 // Create a single transporter and verify it at startup for better visibility
-const transporter = nodemailer.createTransporter({
+const transporter = nodemailer.createTransport({
   host: process.env.SMTP_HOST,
   port: parseInt(process.env.SMTP_PORT) || 465,
   secure: true, // Use SSL/TLS

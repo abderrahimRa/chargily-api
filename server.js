@@ -1,5 +1,4 @@
 import express from "express";
-import axios from "axios";
 import dotenv from "dotenv";
 import cors from "cors";
 
@@ -8,55 +7,20 @@ const app = express();
 app.use(express.json());
 app.use(cors());
 
-// Chargily API base
-const BASE_URL = "https://pay.chargily.com/api/v2/payments";
+// ✅ Your existing Chargily static payment link
+const CHARGILY_PAYMENT_LINK =
+  "https://pay.chargily.com/payment-links/01k8ts5v092rztj10vhwkwm226";
 
-// Single course route
-app.get("/checkout", async (req, res) => {
-  try {
-    const response = await axios.post(
-      BASE_URL,
-      {
-        amount: 4900, // price in DZD
-        currency: "DZD",
-        success_url: "https://www.kobouchacademy.com/943d7675", // thank-you page
-        //failure_url: "https://www.kobouchacademy.com/payment-failed", // not yet created, but you can edit later
-        description: "Digital Course Purchase - Kobouch Academy",
-        metadata: { product: "course1" },
-      },
-      {
-        headers: {
-          Accept: "application/json",
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${process.env.CHARGILY_SECRET_KEY}`,
-        },
-      }
-    );
-
-    const payment = response.data;
-
-    // Redirect buyer to Chargily checkout page
-    if (payment.checkout_url) {
-      res.redirect(payment.checkout_url);
-    } else {
-      res
-        .status(500)
-        .json({ message: "Payment link not returned by Chargily." });
-    }
-  } catch (error) {
-    console.error(
-      "Error creating payment:",
-      error.response?.data || error.message
-    );
-    res.status(500).json({ message: "Failed to create payment." });
-  }
+// 🔹 Checkout route — redirects directly to Chargily link
+app.get("/checkout", (req, res) => {
+  res.redirect(CHARGILY_PAYMENT_LINK);
 });
 
-// Basic route for testing
+// 🔹 Basic test route
 app.get("/", (req, res) => {
-  res.send("Chargily payment API is running ✅");
+  res.send("Chargily redirect API is live ✅");
 });
 
-// Start server
+// 🔹 Start server
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Server live on port ${PORT}`));

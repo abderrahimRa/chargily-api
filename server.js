@@ -1,7 +1,7 @@
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
-import nodemailer from "nodemailer";
+import { Resend } from "resend";
 import axios from "axios";
 import { verifySignature } from "@chargily/chargily-pay";
 
@@ -21,24 +21,8 @@ const CLIENT_WEBHOOK_URL = process.env.CLIENT_WEBHOOK_URL || "";
 const CHARGILY_API_KEY =
   process.env.CHARGILY_API_KEY || process.env.CHARGILY_SECRET_KEY || "";
 
-// Create a single transporter with optimized settings for hosting platforms
-const transporter = nodemailer.createTransport({
-  service: "gmail", // Use Gmail service instead of manual SMTP
-  auth: {
-    user: process.env.SMTP_USER,
-    pass: process.env.SMTP_PASS,
-  },
-  logger: true,
-  debug: false, // Reduce logging
-});
-
-transporter.verify((err, success) => {
-  if (err) {
-    console.error("SMTP transporter verification failed:", err?.message || err);
-  } else {
-    console.log("SMTP transporter is ready");
-  }
-});
+// Initialize Resend (much simpler than SMTP!)
+const resend = new Resend(process.env.RESEND_API_KEY);
 
 // ✅ Chargily static payment link
 const CHARGILY_PAYMENT_LINK =
@@ -325,63 +309,32 @@ app.get("/last-webhook", (req, res) => {
   return res.send(lastWebhook);
 });
 
-// 🔹 Nodemailer setup
+// 🔹 Resend email setup (works on all hosting platforms!)
 async function sendEmail(to, courseLink) {
-  const mailOptions = {
-    from: process.env.SMTP_USER,
-    to,
-    subject: "Your Course from Kobouch Academy",
-    html: `
-      <p>Congratulations! Your payment was successful.</p>
-      <p>Here is your course link:</p>
-      <a href="${courseLink}">Access the course</a>
-    `,
-  };
-
   try {
-    console.log(`Attempting to send email to: ${to}`);
-    const info = await transporter.sendMail(mailOptions);
-    console.log("✅ Email sent successfully:", info?.messageId || info);
-    return info;
-  } catch (err) {
-    console.error("❌ Send Error:", err?.message || err);
+    console.log(`📧 Sending email to: ${to}`);
 
-    // Try alternative approach if Gmail service fails
-    if (
-      err?.message?.includes("timeout") ||
-      err?.message?.includes("connection")
-    ) {
-      console.log("🔄 Attempting fallback SMTP configuration...");
+    const { data, error } = await resend.emails.send({
+      from: "Kobouch Academy <onboarding@resend.dev>", // Default sender (you can customize later)
+      to: [to],
+      subject: "Your Course from Kobouch Academy",
+      html: `
+        <h2>🎉 Congratulations! Your payment was successful.</h2>
+        <p>Here is your course link:</p>
+        <p><a href="${courseLink}" style="background: #4CAF50; color: white; padding: 12px 20px; text-decoration: none; border-radius: 5px;">Access Your Course</a></p>
+        <p>Enjoy learning!</p>
+      `,
+    });
 
-      const fallbackTransporter = nodemailer.createTransport({
-        host: "smtp.gmail.com",
-        port: 587,
-        secure: false,
-        auth: {
-          user: process.env.SMTP_USER,
-          pass: process.env.SMTP_PASS,
-        },
-        tls: {
-          rejectUnauthorized: false,
-        },
-      });
-
-      try {
-        const fallbackInfo = await fallbackTransporter.sendMail(mailOptions);
-        console.log(
-          "✅ Fallback email sent successfully:",
-          fallbackInfo?.messageId || fallbackInfo
-        );
-        return fallbackInfo;
-      } catch (fallbackErr) {
-        console.error(
-          "❌ Fallback also failed:",
-          fallbackErr?.message || fallbackErr
-        );
-        throw fallbackErr;
-      }
+    if (error) {
+      console.error("❌ Resend Error:", error);
+      throw error;
     }
 
+    console.log("✅ Email sent successfully via Resend:", data);
+    return data;
+  } catch (err) {
+    console.error("❌ Failed to send email:", err?.message || err);
     throw err;
   }
 }

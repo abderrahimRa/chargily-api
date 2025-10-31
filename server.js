@@ -235,33 +235,45 @@ app.post("/webhook", async (req, res) => {
           "";
 
         // If no email in webhook, try to fetch customer details using customer_id
-        if (!customerEmail && data.customer_id && CHARGILY_API_KEY) {
-          try {
-            console.log(
-              `Fetching customer details for ID: ${data.customer_id}`
-            );
-            const customerResponse = await axios.get(
-              `https://pay.chargily.com/test/api/v2/customers/${data.customer_id}`,
-              {
-                headers: {
-                  Authorization: `Bearer ${CHARGILY_API_KEY}`,
-                  "Content-Type": "application/json",
-                },
-                timeout: 10000,
-              }
-            );
+        console.log(
+          `Debug: customerEmail='${customerEmail}', customer_id='${
+            data.customer_id
+          }', CHARGILY_API_KEY exists: ${!!CHARGILY_API_KEY}`
+        );
 
-            customerEmail =
-              customerResponse.data?.email ||
-              customerResponse.data?.data?.email ||
-              "";
-            console.log(`Fetched customer email: ${customerEmail}`);
-          } catch (apiError) {
-            console.error(
-              `Failed to fetch customer details: ${
-                apiError?.response?.data || apiError?.message || apiError
-              }`
+        if (!customerEmail && data.customer_id) {
+          if (!CHARGILY_API_KEY) {
+            console.warn(
+              "⚠️ Cannot fetch customer details: CHARGILY_API_KEY not configured"
             );
+          } else {
+            try {
+              console.log(
+                `Fetching customer details for ID: ${data.customer_id}`
+              );
+              const customerResponse = await axios.get(
+                `https://pay.chargily.com/test/api/v2/customers/${data.customer_id}`,
+                {
+                  headers: {
+                    Authorization: `Bearer ${CHARGILY_API_KEY}`,
+                    "Content-Type": "application/json",
+                  },
+                  timeout: 10000,
+                }
+              );
+
+              customerEmail =
+                customerResponse.data?.email ||
+                customerResponse.data?.data?.email ||
+                "";
+              console.log(`Fetched customer email: ${customerEmail}`);
+            } catch (apiError) {
+              console.error(
+                `Failed to fetch customer details: ${
+                  apiError?.response?.data || apiError?.message || apiError
+                }`
+              );
+            }
           }
         }
 

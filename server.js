@@ -1,39 +1,60 @@
 import express from "express";
 import dotenv from "dotenv";
 import cors from "cors";
+import fetch from "node-fetch"; // Using fetch instead of axios
 
 dotenv.config();
 const app = express();
-app.use(express.json());
 app.use(cors());
+app.use(express.json());
 
-// ✅ Your existing Chargily static payment link
-const CHARGILY_PAYMENT_LINK =
-  "http://pay.chargily.com/test/payment-links/01k8x9dyrp67pkm5kt3gb7xry4";
+// ✅ Chargily API live endpoint for payment-links
+const CHARGILY_API_URL = "https://pay.chargily.com/api/v2/payment-links";
+const CHARGILY_SECRET_KEY = process.env.CHARGILY_SECRET_KEY;
 
-// ✅ Thank-you and failure pages
+// ✅ Pages
 const THANK_YOU_PAGE = "https://www.kobouchacademy.com/943d7675";
 const FAILURE_PAGE = "https://www.kobouchacademy.com/93e8de5d";
 
-// 🔹 Checkout route — redirects directly to Chargily link
-app.get("/checkout", (req, res) => {
-  res.redirect(CHARGILY_PAYMENT_LINK);
+// 🔹 Checkout route — dynamically creates a live payment link
+app.get("/checkout", async (req, res) => {
+  try {
+    const response = await fetch(CHARGILY_API_URL, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${CHARGILY_SECRET_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        amount: 4900,
+        currency: "dzd",
+        description: "Digital Course Purchase - Kobouch Academy",
+        success_url: THANK_YOU_PAGE,
+        failure_url: FAILURE_PAGE,
+        metadata: { product: "course1" },
+      }),
+    });
+
+    const data = await response.json();
+
+    if (data.checkout_url) {
+      // Redirect user to live checkout page
+      res.redirect(data.checkout_url);
+    } else {
+      res
+        .status(500)
+        .json({ message: "Failed to generate payment link", data });
+    }
+  } catch (err) {
+    console.error("Error creating live payment link:", err);
+    res.status(500).json({ message: "Server error" });
+  }
 });
 
-// 🔹 Thank-you page route
-app.get("/thank-you", (req, res) => {
-  res.redirect(THANK_YOU_PAGE);
-});
-
-// 🔹 Failure page route
-app.get("/failed", (req, res) => {
-  res.redirect(FAILURE_PAGE);
-});
-
-// 🔹 Basic test route
-app.get("/", (req, res) => {
-  res.send("Chargily redirect API is live ✅");
-});
+// 🔹 Optional routes
+app.get("/thank-you", (req, res) => res.redirect(THANK_YOU_PAGE));
+app.get("/failed", (req, res) => res.redirect(FAILURE_PAGE));
+app.get("/", (req, res) => res.send("Chargily live payment API is running ✅"));
 
 // 🔹 Start server
 const PORT = process.env.PORT || 3000;
